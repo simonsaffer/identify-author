@@ -11,17 +11,32 @@ import org.apache.spark.{SparkConf, SparkContext}
   */
 object Processor {
 
-  def countWords(rdd: RDD[String]) = {
-    val counts = rdd.flatMap(line => line.split(" "))
-      .map(word => (word, 1))
+  def countWords(words: RDD[String]) = {
+    val counts = words.map(word => (word, 1))
       .reduceByKey(_ + _)
+  }
 
-    counts.foreach(println(_))
+  def calcNumberOfDistinctWordsUsed(words: RDD[String]) = words.distinct().count()
+
+  // Does the author prefer some subset of all the words used
+  def wordProbabilityDistribution(words: RDD[String]) = 1
+
+  def avgWordLength(words: RDD[String], numberOfDistinctWords: Long) = {
+    words.map(_.length).reduce(_+_) / numberOfDistinctWords
+  }
+
+  def stopWordRatio(words: RDD[String], numberOfDistinctWords: Long, stopWords: RDD[String]) = words.union(stopWords)
+
+  def preprocessFile(rawRDDFromFile: RDD[String]): RDD[String] = {
+    rawRDDFromFile
+      .map(_.replaceAll("[^A-Za-z ]", ""))
+      .map(_.toLowerCase())
+      .flatMap(_.split(" "))
   }
 
   def main(args: Array[String]) {
 
-    val conf = new SparkConf().setAppName("Identify Authors").setMaster("local[2]")
+    val conf = new SparkConf().setAppName("Identify Authors").setMaster("local[4]")
 
     val sc = new SparkContext(conf)
 
@@ -29,13 +44,23 @@ object Processor {
 
     val files = FileSystem.get(uri, sc.hadoopConfiguration).listFiles(new Path("/books"), true)
 
+    val stopWords = sc.textFile("stopwords.txt")
+
     while (files.hasNext) {
 
-      val file = files.next()
+      val filePath: String = files.next().getPath.toString
+      val words: RDD[String] = preprocessFile(sc.textFile(filePath))
 
-      countWords(sc.textFile(file.getPath.toString))
+      val numberOfDistinctWordsUsed = calcNumberOfDistinctWordsUsed(words)
+
+      val averageWordCount = avgWordLength(words, numberOfDistinctWordsUsed)
+
+      val stopWordsRatio = stopWordRatio(words, numberOfDistinctWordsUsed, stopWords)
+
+      countWords(words)
 
     }
+
 
   }
 
